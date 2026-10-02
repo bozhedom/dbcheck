@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbcheck"
+version = "1.1.0"
+description = "Чекер лаб курса «Разработка баз данных»: проверяет базу PostgreSQL по системному каталогу и SQL-сценариям"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg[binary]>=3.1",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+dbcheck = "dbcheck.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

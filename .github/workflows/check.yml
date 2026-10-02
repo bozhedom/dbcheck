@@ -1,0 +1,58 @@
+# Общий workflow для репозиториев студентов. Подключается так (уже есть в шаблоне):
+#
+#   jobs:
+#     dbcheck:
+#       uses: bozhedom/dbcheck/.github/workflows/check.yml@v1
+#
+# На чистой машине копирует .env.example в .env, поднимает базу из db/ (docker compose up)
+# и запускает чекер по лабам с 1 по N. N берётся из имени ветки: lab-3 означает 3.
+# Зелёная галочка: база создаётся из репозитория и автоматические пункты проходят.
+name: dbcheck
+
+on:
+  workflow_call:
+    inputs:
+      lab:
+        description: "Номер лабы (по умолчанию из имени ветки lab-N)"
+        type: string
+        default: ""
+      dbcheck-ref:
+        description: "Версия чекера (тег или ветка)"
+        type: string
+        default: v1
+
+jobs:
+  dbcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # проверяем коммит студента, а не merge-коммит GitHub
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Номер лабы
+        id: lab
+        run: |
+          lab="${{ inputs.lab }}"
+          branch="${{ github.head_ref || github.ref_name }}"
+          if [ -z "$lab" ]; then lab=$(echo "$branch" | sed -n 's/.*lab-\{0,1\}\([1-5]\).*/\1/p' | head -1); fi
+          echo "lab=$lab" >> "$GITHUB_OUTPUT"
+          if [ -z "$lab" ]; then echo "::notice::Ветка «$branch» не похожа на lab-N, проверка не нужна"; fi
+
+      - uses: actions/setup-python@v6
+        if: steps.lab.outputs.lab != ''
+        with:
+          python-version: "3.12"
+
+      - name: Установить dbcheck
+        if: steps.lab.outputs.lab != ''
+        run: pip install "git+https://github.com/bozhedom/dbcheck@${{ inputs.dbcheck-ref }}"
+
+      - name: Поднять базу из db/ и проверить лабы 1…${{ steps.lab.outputs.lab }}
+        if: steps.lab.outputs.lab != ''
+        run: dbcheck --lab "${{ steps.lab.outputs.lab }}" --all --stars --ci
+
+      - name: Логи базы (если что-то упало)
+        if: failure()
+        run: docker compose logs --no-color --tail 120 db
