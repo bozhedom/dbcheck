@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .core import Ctx, Fail, Item, Lab, Star, need_script, plural, score_two
+from .core import Ctx, Fail, Item, Lab, Star, need_script, plural, score_any, score_two
 from .sqlscript import step_sql
 
 FILE = "demo/lab2.sql"
@@ -170,24 +170,29 @@ def star_second_window(ctx: Ctx, item: Item) -> None:
     item.ok("оконные функции: " + ", ".join(f"{f}() в {', '.join(sorted(set(k)))}" for f, k in funcs.items()))
 
 
-def star_monthly(ctx: Ctx, item: Item) -> None:
+COND_AGG = (r"\b(?:count|sum|avg)\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*FILTER\s*\(\s*WHERE\b([^()]*(?:\([^()]*\)[^()]*)*)\)"
+            r"|\b(?:count|sum|avg|min|max)\s*\(\s*CASE\s+WHEN\b(.*?)\bTHEN\b")
+
+
+def _conditions(sql: str) -> set[str]:
+    """Разные условия в подсчётах FILTER (WHERE ...) и CASE WHEN ... THEN: одно условие в доле не считается вторым."""
+    return {re.sub(r"\s+", " ", a or b).strip().lower() for a, b in re.findall(COND_AGG, sql, re.I | re.S)}
+
+
+def star_summary(ctx: Ctx, item: Item) -> None:
     _, steps = _steps(ctx, item)
-    hits = [s for s in steps if re.search(r"date_trunc\s*\(\s*''|to_char\s*\(|extract\s*\(\s*month", _sql(s), re.I)
-            and re.search(r"\blag\s*\(", _sql(s), re.I)]
+    hits = [(s, len(_conditions(_sql(s)))) for s in steps if re.search(r"\bGROUP\s+BY\b", _sql(s), re.I)]
+    hits = [(s, n) for s, n in hits if n]
     if not hits:
-        raise Fail("нет помесячной динамики: date_trunc('month', ...) и LAG() для сравнения с прошлым месяцем")
-    item.ok(f"помесячная динамика с LAG: запрос {', '.join(s.step.key for s in hits)}")
-    if not any(re.search(r"100|percent|pct|%", _sql(s), re.I) for s in hits):
+        raise Fail("нет сводки: GROUP BY и подсчёт по условию, count(*) FILTER (WHERE ...) или sum(CASE WHEN ...)")
+    best, n = max(hits, key=lambda h: h[1])
+    item.ok(f"сводка с условными подсчётами: запрос {', '.join(s.step.key for s, _ in hits)}")
+    if n < 2:
         item.half = True
-        item.info("процента к прошлому месяцу не видно")
-
-
-def star_recursive(ctx: Ctx, item: Item) -> None:
-    _, steps = _steps(ctx, item)
-    hits = _find(steps, r"\bWITH\s+RECURSIVE\b")
-    if not hits:
-        raise Fail("нет WITH RECURSIVE (иерархия или календарь без пропусков)")
-    item.ok(f"рекурсивный CTE: запрос {', '.join(hits)}")
+        item.info(f"в запросе {best.step.key} одно условие в подсчётах, нужно хотя бы два разных")
+    if not any(re.search(r"100", _sql(s)) for s, _ in hits):
+        item.half = True
+        item.info("доли в процентах не видно: round(100.0 * count(*) FILTER (WHERE ...) / count(*), 1)")
 
 
 LAB = Lab(
@@ -206,9 +211,8 @@ LAB = Lab(
             ("WITH + топ-N в каждой категории (ROW_NUMBER/RANK)", star_top_n),
             ("Вторая оконная функция: накопительная сумма или LAG", star_second_window),
         ]),
-        Star("★★ аналитика", score_two, [
-            ("Помесячная динамика с процентом к прошлому месяцу", star_monthly),
-            ("Рекурсивный CTE", star_recursive),
+        Star("★★ сводка с условными подсчётами", score_any, [
+            ("GROUP BY, два подсчёта через FILTER или CASE и доля в процентах", star_summary),
         ]),
     ],
 )

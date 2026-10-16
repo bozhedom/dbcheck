@@ -399,7 +399,7 @@ def run_lab(ctx: Ctx, lab: Lab, *, stars: bool, only: str | None) -> LabResult:
                 hi = 2 if any(p.status in (PASS, MANUAL) for p in parts) else (1 if any(p.status == HALF for p in parts) else 0)
                 lo = 2 if any(p.status == PASS for p in parts) else (1 if any(p.status == HALF for p in parts) else 0)
                 chosen = [p.title for p in parts if p.status in (PASS, MANUAL, HALF)]
-                if chosen:
+                if chosen and len(parts) > 1:
                     print(dim(f"      одно на выбор, засчитывается: {chosen[0]}; остальные варианты не нужны"))
             else:
                 hi = star.scorer([p.status in (PASS, MANUAL) for p in parts])
